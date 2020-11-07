@@ -40,7 +40,9 @@ int main(int argc, char** argv)
 {
 	printf("This is a tiny shell. call 'help' for more info.\n");
 	printf("> ");
+
 	shell_loop();
+
 	return 0;
 }
 
@@ -200,7 +202,8 @@ void exec_comarg(char* input)
 		// strlen ignores null terminator, so adding + 1 to malloc
 		args[argc] = malloc(strlen(token) + 1); 
 		token[strcspn(token, "\r\n")] = 0;
-		strcpy(args[argc], token);
+		strncpy(args[argc], token, strlen(token)+1);
+		//strcpy(args[argc], token);
 		
 		argc++;
 		token = strtok(NULL, " ");
@@ -218,6 +221,20 @@ void exec_comarg(char* input)
 	}
 	///
 
+	//execvp expects last arg in args to be NULL, make sure we have it..
+
+	char** newArgs = realloc(args, sizeof(char*)*(argc+1));
+	if(newArgs != NULL)
+	{
+		args = newArgs;
+	}
+	else
+	{
+		printf("An error while reallocating memory occurred. %s\n", strerror(errno));
+		exit(1);
+	}
+	args[argc] = NULL;
+	argc++;
 	//CALLING THE COMMAND
 	call_command(args[0], args, argc);
 
@@ -248,18 +265,19 @@ void call_command(char* commandName, char** args, int argc)
 	}
 	else if (pid == 0)
 	{	
-
-		printf("DEBUG: Executing %s with args: ", commandName);
-		for(int i = 0; i < argc; i++)
-		{
-			printf("%s\n", args[i]);
-		}
-
 		if(execvp(commandName, args) == -1)
 		{
 			printf("Error executing program. %s\n", strerror(errno));
 			return;
 		}
+
+		for(int i = 0; i < argc+1; i++)
+		{
+			if(args[i])
+				free(args[i]);
+		}
+		if(args)
+			free(args);
 	}
 
 	do
