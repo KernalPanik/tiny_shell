@@ -26,6 +26,8 @@ sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | 
 #define TOKEN_DELIMITERS = " \t"
 
 bool SHELL_CLOSED = false;
+int BACKGROUND_PROCS[256] = { 0 };
+int BACKGROUND_PROC_COUNT = 0;
 
 void shell_loop();
 void exec_comarg(char* input);
@@ -99,6 +101,22 @@ void shell_loop()
 
 			exec_comarg(output[i]);
 		}		
+
+		//if there are background procs, wait for them
+		if(BACKGROUND_PROC_COUNT > 0)
+		{
+			for(int i = 0; i < BACKGROUND_PROC_COUNT; i++)
+			{
+				int commandStatus = 0;
+				do
+				{
+					waitpid(BACKGROUND_PROCS[i], &commandStatus, WUNTRACED);
+				} while (!WIFEXITED(commandStatus) && !WIFSIGNALED(commandStatus));
+				BACKGROUND_PROCS[i] = 0;
+			}
+		}
+
+		BACKGROUND_PROC_COUNT = 0;
 
 		// close all pipes, free the memory
 		dup2(in, 0);
@@ -258,6 +276,16 @@ void call_command(char* commandName, char** args, int argc)
 	pid_t pid;
 	pid = fork();
 
+	if(strcmp(commandName, "sleep") == 0)
+	{
+		BACKGROUND_PROCS[BACKGROUND_PROC_COUNT] = pid;
+		BACKGROUND_PROC_COUNT++;
+	}
+	else
+	{
+	}
+	
+
 	if(pid < 0)
 	{
 		printf("Failed creating new process. %s\n", strerror(errno));
@@ -270,7 +298,7 @@ void call_command(char* commandName, char** args, int argc)
 			printf("Error executing program. %s\n", strerror(errno));
 			return;
 		}
-
+	
 		for(int i = 0; i < argc+1; i++)
 		{
 			if(args[i])
@@ -279,11 +307,29 @@ void call_command(char* commandName, char** args, int argc)
 		if(args)
 			free(args);
 	}
-
-	do
+	else
 	{
-		waitpid(pid, &commandStatus, WUNTRACED);
-	} while (!WIFEXITED(commandStatus) && !WIFSIGNALED(commandStatus));
+		do
+		{
+			if(strcmp(commandName, "sleep") != 0)
+			{
+				waitpid(pid, &commandStatus, WUNTRACED);
+			}
+			//waitpid(pid, &commandStatus, WUNTRACED);
+		} while (!WIFEXITED(commandStatus) && !WIFSIGNALED(commandStatus));
+	}
+	
+
+	/*do
+	{
+		if(strcmp(commandName, "sleep"))
+		{
+			BACKGROUND_PROCS[BACKGROUND_PROC_COUNT] = pid;
+			BACKGROUND_PROC_COUNT++;
+		}
+			
+		waitpid(pid, &commandStatus, WUNTRACED | WNOHANG);
+	} while (!WIFEXITED(commandStatus) && !WIFSIGNALED(commandStatus));*/
 }
 
 // Function that checks if given command is shell builtin, and if it is, execute it, then return true
