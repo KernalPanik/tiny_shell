@@ -35,18 +35,26 @@ void shell_loop()
 	size_t bufferLen = 0;
 	size_t nread;
 
-	while((nread = getline(&str, &bufferLen, stdin)) != -1)
-	{
+	while((nread = getline(&str, &bufferLen, stdin)) != -1 && SHELL_CLOSED == false)
+	{	
 		char** output = NULL;
 		int outputSize = 0;
 
+		if((strcmp(str, "\n") == 0) || (strcmp(str, "\r\n") == 0) || (strcmp(str, "\0") == 0) ||
+		(strcmp(str, "") == 0))
+		{
+			printf("> ");
+			continue;
+		}
+
 		// PREPARING PIPES
+		// saving current stdin and stdout
 		int in = dup(0); // stdin 
 		int out = dup(1); // stdout
 
-		int fdin = dup(in);
+		int fdin;
 		int fdout;
-
+		
 		// parse the line into an array of comargs (commands + arguments)
 		split_into_comargs(str, &output, &outputSize);
 
@@ -75,13 +83,8 @@ void shell_loop()
 			exec_comarg(output[i]);
 		}
 
-		// if exit command is executed, SHELL_CLOSED is set to false
-		if(SHELL_CLOSED == true)
-		{
-			break;
-		}
-
 		// close all pipes, free the memory
+		// restore stdin and stdout
 		dup2(in, 0);
 		dup2(out, 1);
 		close(in);
@@ -91,6 +94,13 @@ void shell_loop()
 			free(output[i]);
 		}
 		free(output);
+
+		// if exit command is executed, SHELL_CLOSED is set to false
+		if(SHELL_CLOSED == true)
+		{
+			break;
+		}
+
 		printf("> ");
 	}
 
@@ -185,16 +195,7 @@ void exec_comarg(char* input)
 		token = strtok(NULL, " ");
 	}
 
-	// Retrieve commands from parsed args
-	if(strcmp(args[0], "\n") == 0 || strcmp(args[0], "\0") == 0 || strcmp(args[0], "") == 0)
-	{
-		for(int i = 0; i < argc; i++)
-		{
-			free(args[i]);
-		}
-		free(args);
-		return;
-	}
+	
 	///
 
 	//CALLING THE COMMAND
@@ -237,7 +238,6 @@ void call_command(char* commandName, char** args, int argc)
 	do
 	{
 		waitpid(pid, &commandStatus, WUNTRACED);
-		//TODO: Figure out how to explain WIF...
 	} while (!WIFEXITED(commandStatus) && !WIFSIGNALED(commandStatus));
 }
 
