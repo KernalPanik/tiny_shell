@@ -1,3 +1,19 @@
+/*
+    
+ls | cat -n | cat -n | cat -n | cat -n | cat -n | cat -n
+
+tty
+
+ls -l /proc/self/fd | cat | cat | cat | cat
+
+ps axf | grep tty1
+
+sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1
+
+*/
+
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,10 +51,17 @@ void shell_loop()
 	size_t bufferLen = 0;
 	size_t nread;
 
-	while((nread = getline(&str, &bufferLen, stdin)) != -1)
+	while((nread = getline(&str, &bufferLen, stdin)) != -1 && SHELL_CLOSED == false)
 	{
 		char** output = NULL;
 		int outputSize = 0;
+
+		if(strcmp(str, "\n") == 0 || strcmp(str, "\r\n") == 0 || strcmp(str, "") == 0 
+		||strcmp(str, " ") == 0)
+		{
+			printf("> ");
+			continue;
+		}
 
 		// PREPARING PIPES
 		int in = dup(0); // stdin 
@@ -73,13 +96,7 @@ void shell_loop()
 			close(fdout);
 
 			exec_comarg(output[i]);
-		}
-
-		// if exit command is executed, SHELL_CLOSED is set to false
-		if(SHELL_CLOSED == true)
-		{
-			break;
-		}
+		}		
 
 		// close all pipes, free the memory
 		dup2(in, 0);
@@ -91,6 +108,10 @@ void shell_loop()
 			free(output[i]);
 		}
 		free(output);
+		if(SHELL_CLOSED == true)
+		{
+			break;
+		}
 		printf("> ");
 	}
 
@@ -226,7 +247,14 @@ void call_command(char* commandName, char** args, int argc)
 		return;
 	}
 	else if (pid == 0)
-	{
+	{	
+
+		printf("DEBUG: Executing %s with args: ", commandName);
+		for(int i = 0; i < argc; i++)
+		{
+			printf("%s\n", args[i]);
+		}
+
 		if(execvp(commandName, args) == -1)
 		{
 			printf("Error executing program. %s\n", strerror(errno));
@@ -237,7 +265,6 @@ void call_command(char* commandName, char** args, int argc)
 	do
 	{
 		waitpid(pid, &commandStatus, WUNTRACED);
-		//TODO: Figure out how to explain WIF...
 	} while (!WIFEXITED(commandStatus) && !WIFSIGNALED(commandStatus));
 }
 
