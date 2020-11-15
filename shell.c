@@ -66,12 +66,14 @@ void shell_loop()
 			continue;
 		}
 
+
 		// Prepare pipes
 		int in = dup(0); // stdin 
 		int out = dup(1); // stdout
 
-		int fdin = dup(in);
+		int fdin;
 		int fdout;
+
 
 		// Parse the line into an array of comargs (commands + arguments)
 		split_into_comargs(str, &output, &outputSize);
@@ -127,6 +129,7 @@ void shell_loop()
 		BACKGROUND_PROC_COUNT = 0;
 
 		// close all pipes, free the memory
+		// restore stdin and stdout
 		dup2(in, 0);
 		dup2(out, 1);
 		close(in);
@@ -245,6 +248,10 @@ void exec_comarg(char* input)
 		free(args);
 		return;
 	}
+
+
+	//execvp expects last arg in args to be NULL, make sure we have it..
+
 
 	// execvp expects last arg in args to be NULL, make sure we have it..
 	char** newArgs = realloc(args, sizeof(char*)*(argc+1));
