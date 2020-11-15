@@ -12,7 +12,6 @@ sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | 
 
 */
 
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,6 +58,7 @@ void shell_loop()
 		char** output = NULL;
 		int outputSize = 0;
 
+		// Check if user just presses 'Enter'
 		if(strcmp(str, "\n") == 0 || strcmp(str, "\r\n") == 0 || strcmp(str, "") == 0 
 		||strcmp(str, " ") == 0)
 		{
@@ -66,15 +66,16 @@ void shell_loop()
 			continue;
 		}
 
-		// PREPARING PIPES
-		// saving current stdin and stdout
+
+		// Prepare pipes
 		int in = dup(0); // stdin 
 		int out = dup(1); // stdout
 
 		int fdin;
 		int fdout;
-		
-		// parse the line into an array of comargs (commands + arguments)
+
+
+		// Parse the line into an array of comargs (commands + arguments)
 		split_into_comargs(str, &output, &outputSize);
 
 		for(int i = 0; i < outputSize; i++)
@@ -102,18 +103,27 @@ void shell_loop()
 			exec_comarg(output[i]);
 		}		
 
-		//if there are background procs, wait for them
-		if(BACKGROUND_PROC_COUNT > 0)
+		// Go through all background processes, and wait for last process to finish
+		// Reduce the background process count each time
+		while(BACKGROUND_PROC_COUNT > 0)
 		{
 			for(int i = 0; i < BACKGROUND_PROC_COUNT; i++)
 			{
 				int commandStatus = 0;
 				do
 				{
-					waitpid(BACKGROUND_PROCS[i], &commandStatus, WUNTRACED);
+					if(i == BACKGROUND_PROC_COUNT - 1)
+					{
+						waitpid(BACKGROUND_PROCS[i], &commandStatus, WUNTRACED);
+					}
+					else
+					{
+						waitpid(BACKGROUND_PROCS[i], &commandStatus, WNOHANG);
+					}
 				} while (!WIFEXITED(commandStatus) && !WIFSIGNALED(commandStatus));
 				BACKGROUND_PROCS[i] = 0;
 			}
+			BACKGROUND_PROC_COUNT--;
 		}
 
 		BACKGROUND_PROC_COUNT = 0;
@@ -129,6 +139,7 @@ void shell_loop()
 			free(output[i]);
 		}
 		free(output);
+
 		if(SHELL_CLOSED == true)
 		{
 			break;
@@ -185,13 +196,12 @@ void split_into_comargs(char* input, char** outputArr[], int* outputSize)
 // A function that splits given command + args string into tokens, and passes tokenized result into call_command()
 void exec_comarg(char* input)
 {
-	// INPUT PROCESSING
 	char* token;
 	token = strtok(input, " ");
 	int argc = 0;
 	char** args = NULL;
 
-	//Tokenize input, get array of strings (args)
+	// Tokenize input, get array of strings (args)
 	while(token != NULL)
 	{
 		if(argc == 0)
@@ -228,11 +238,22 @@ void exec_comarg(char* input)
 		token = strtok(NULL, " ");
 	}
 
-	
-	///
+	// Retrieve commands from parsed args
+	if(strcmp(args[0], "\n") == 0 || strcmp(args[0], "\0") == 0 || strcmp(args[0], "") == 0)
+	{
+		for(int i = 0; i < argc; i++)
+		{
+			free(args[i]);
+		}
+		free(args);
+		return;
+	}
+
 
 	//execvp expects last arg in args to be NULL, make sure we have it..
 
+
+	// execvp expects last arg in args to be NULL, make sure we have it..
 	char** newArgs = realloc(args, sizeof(char*)*(argc+1));
 	if(newArgs != NULL)
 	{
@@ -245,7 +266,7 @@ void exec_comarg(char* input)
 	}
 	args[argc] = NULL;
 	argc++;
-	//CALLING THE COMMAND
+
 	call_command(args[0], args, argc);
 
 	for(int i = 0; i < argc; i++)
@@ -264,19 +285,8 @@ void call_command(char* commandName, char** args, int argc)
 		return;
 	}
 
-	int commandStatus = 0;
 	pid_t pid;
 	pid = fork();
-
-	if(strcmp(commandName, "sleep") == 0)
-	{
-		BACKGROUND_PROCS[BACKGROUND_PROC_COUNT] = pid;
-		BACKGROUND_PROC_COUNT++;
-	}
-	else
-	{
-	}
-	
 
 	if(pid < 0)
 	{
@@ -301,27 +311,10 @@ void call_command(char* commandName, char** args, int argc)
 	}
 	else
 	{
-		do
-		{
-			if(strcmp(commandName, "sleep") != 0)
-			{
-				waitpid(pid, &commandStatus, WUNTRACED);
-			}
-			//waitpid(pid, &commandStatus, WUNTRACED);
-		} while (!WIFEXITED(commandStatus) && !WIFSIGNALED(commandStatus));
+		// Add this process to the queue
+		BACKGROUND_PROCS[BACKGROUND_PROC_COUNT] = pid;
+		BACKGROUND_PROC_COUNT++;		
 	}
-	
-
-	/*do
-	{
-		if(strcmp(commandName, "sleep"))
-		{
-			BACKGROUND_PROCS[BACKGROUND_PROC_COUNT] = pid;
-			BACKGROUND_PROC_COUNT++;
-		}
-			
-		waitpid(pid, &commandStatus, WUNTRACED | WNOHANG);
-	} while (!WIFEXITED(commandStatus) && !WIFSIGNALED(commandStatus));*/
 }
 
 // Function that checks if given command is shell builtin, and if it is, execute it, then return true
