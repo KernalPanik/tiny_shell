@@ -12,11 +12,6 @@ sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | 
 
 */
 
-//TODO: Compress the code
-//TODO: Final testing
-//TODO: Add more comments
-//TODO: PR
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
