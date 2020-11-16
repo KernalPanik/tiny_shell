@@ -12,7 +12,10 @@ sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | 
 
 */
 
+#define _GNU_SOURCE
+
 #include <stdio.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
@@ -24,15 +27,19 @@ sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | sleep 1 | 
 #define TOKEN_DELIMITERS = " \t"
 
 bool SHELL_CLOSED = false;
+
+// Max 256 processes can be run at once
 int BACKGROUND_PROCS[256] = { 0 };
 int BACKGROUND_PROC_COUNT = 0;
 
+// Shell function definitions
 void shell_loop();
-void exec_comarg(char* input);
-void call_command(char* commandName, char** args, int argc);
+void exec_comarg(char* input, int infd, int outfd);
+void call_command(char* commandName, char** args, int argc, int infd, int outfd);
 bool try_shell_command(char* commandName, char** args, int argc);
 void split_into_comargs(char* input, char** outputArr[], int* argc);
 
+// Builtin command definitions
 void cmd_help();
 void cmd_cd(char** args);
 
@@ -66,11 +73,12 @@ void shell_loop()
 			continue;
 		}
 
-		// Prepare pipes
+		// Save current stdin and stdout so we'll be able to restore them after we're done
 		int in = dup(0); // stdin 
 		int out = dup(1); // stdout
 
-		int fdin = dup(in);
+
+		int fdin = dup(in); // Make sure to use default input
 		int fdout;
 
 		// Parse the line into an array of comargs (commands + arguments)
@@ -78,6 +86,7 @@ void shell_loop()
 
 		for(int i = 0; i < outputSize; i++)
 		{
+			// Redirect input to the stdin
 			dup2(fdin, 0);
 			close(fdin);
 
@@ -90,15 +99,19 @@ void shell_loop()
 			{
 				// Not last command
 				int fdpipe[2];
-				pipe(fdpipe);
+				// Create a pipe, make sure that it will be closed in the child process 
+				// after exec is called by using O_CLOEXEC flag 
+				pipe2(fdpipe, O_CLOEXEC);
 				fdout = fdpipe[1];
 				fdin = fdpipe[0];
 			}
 
+			// Redirect the output to the stdout
 			dup2(fdout, 1);
 			close(fdout);
 
-			exec_comarg(output[i]);
+			// Passing duplicate stdout and stdin descriptors so they can be closed in a child process
+			exec_comarg(output[i], in, out);
 		}		
 
 		// Go through all background processes, and wait for last process to finish
@@ -112,31 +125,32 @@ void shell_loop()
 				{
 					if(i == BACKGROUND_PROC_COUNT - 1)
 					{
+						// Block the main thread and wait for last process to be finished
 						waitpid(BACKGROUND_PROCS[i], &commandStatus, WUNTRACED);
 					}
-					else
-					{
-						waitpid(BACKGROUND_PROCS[i], &commandStatus, WNOHANG);
-					}
 				} while (!WIFEXITED(commandStatus) && !WIFSIGNALED(commandStatus));
+				// Initialize finished proc id back to 0
 				BACKGROUND_PROCS[i] = 0;
 			}
 			BACKGROUND_PROC_COUNT--;
 		}
 
+		// Make sure there are no background processes
 		BACKGROUND_PROC_COUNT = 0;
 
-		// close all pipes, free the memory
+		// Restore stdin and stdout to the previous state
 		dup2(in, 0);
 		dup2(out, 1);
 		close(in);
 		close(out);
+		// Free the memory allocated for comargs
 		for(int i = 0; i < outputSize; i++)
 		{
 			free(output[i]);
 		}
 		free(output);
 
+		// If 'Exit' command is called, SHELL_CLOSED is set to true
 		if(SHELL_CLOSED == true)
 		{
 			break;
@@ -147,7 +161,7 @@ void shell_loop()
 	free(str);
 }
 
-// A function that generates an array of comargs (command + args) strings, that can be passed to exec_comarg() function
+// A function that generates an array of comargs (command + args) strings, that can be passed to exec_comarg()
 // function expects a pointer to the array of strings, and puts the result into this array
 // outputSize is set to the size of output array
 void split_into_comargs(char* input, char** outputArr[], int* outputSize)
@@ -159,10 +173,12 @@ void split_into_comargs(char* input, char** outputArr[], int* outputSize)
 	{
 		if((*outputSize) == 0)
 		{
+			// Allocate memory for the first element
 			resultArr = malloc(sizeof(char*));
 		}
 		else
 		{
+			// Reallocate memory for more elements
 			char** newArr = realloc(resultArr, sizeof(char*) * (*outputSize+1));
 			if(newArr != NULL)
 			{
@@ -181,17 +197,22 @@ void split_into_comargs(char* input, char** outputArr[], int* outputSize)
 			}
 		}
 
+		// Allocate memory for the string adding trailing \0 character
 		resultArr[(*outputSize)] = malloc(strlen(token)+1);
+		// Remove trailing newline character
 		token[strcspn(token, "\r\n")] = 0;
+		// Move parsed token to the aarray of comargs
 		strcpy(resultArr[(*outputSize)], token);	
+		// Move to the next element 
 		(*outputSize)++;
+
 		token = strtok(NULL, "|");	
 	}
 	*outputArr = resultArr;
 }
 
 // A function that splits given command + args string into tokens, and passes tokenized result into call_command()
-void exec_comarg(char* input)
+void exec_comarg(char* input, int infd, int outfd)
 {
 	char* token;
 	token = strtok(input, " ");
@@ -203,10 +224,12 @@ void exec_comarg(char* input)
 	{
 		if(argc == 0)
 		{
+			// Allocate memory for a first element
 			args = malloc(sizeof(char*));
 		}
 		else
 		{
+			// Reallocate memory for more elements
 			char** newArgs = realloc(args, sizeof(char*)*(argc+1));
 			if(newArgs != NULL)
 			{
@@ -227,9 +250,7 @@ void exec_comarg(char* input)
 		
 		// strlen ignores null terminator, so adding + 1 to malloc
 		args[argc] = malloc(strlen(token) + 1); 
-		token[strcspn(token, "\r\n")] = 0;
 		strncpy(args[argc], token, strlen(token)+1);
-		//strcpy(args[argc], token);
 		
 		argc++;
 		token = strtok(NULL, " ");
@@ -260,7 +281,7 @@ void exec_comarg(char* input)
 	args[argc] = NULL;
 	argc++;
 
-	call_command(args[0], args, argc);
+	call_command(args[0], args, argc, infd, outfd);
 
 	for(int i = 0; i < argc; i++)
 	{
@@ -270,7 +291,7 @@ void exec_comarg(char* input)
 }
 
 // A function that executes passed command with args
-void call_command(char* commandName, char** args, int argc)
+void call_command(char* commandName, char** args, int argc, int infd, int outfd)
 {
 	// Check if it is a builtin command
 	if(try_shell_command(commandName, args, argc) == true)
@@ -288,12 +309,16 @@ void call_command(char* commandName, char** args, int argc)
 	}
 	else if (pid == 0)
 	{	
+		// Close unused file descriptors before exec
+		close(infd);
+		close(outfd);
+
 		if(execvp(commandName, args) == -1)
 		{
 			printf("Error executing program. %s\n", strerror(errno));
 			return;
 		}
-	
+
 		for(int i = 0; i < argc+1; i++)
 		{
 			if(args[i])
